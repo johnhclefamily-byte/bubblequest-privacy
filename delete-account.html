@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bubble Quest: Request Data Deletion</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; line-height: 1.6; color: #222; }
+  h1, h2 { line-height: 1.25; }
+  label { display: block; margin-top: 1rem; font-weight: 600; }
+  input, textarea { width: 100%; box-sizing: border-box; padding: .6rem; font: inherit; border: 1px solid #999; border-radius: 6px; }
+  .hint { font-weight: 400; color: #555; font-size: .9rem; }
+  button { margin-top: 1.25rem; padding: .7rem 1.4rem; font: inherit; font-weight: 600; border: 0; border-radius: 6px; background: #1a5fb4; color: #fff; cursor: pointer; }
+  button:disabled { opacity: .6; cursor: default; }
+  .box { margin-top: 1.25rem; padding: .9rem 1rem; border-radius: 6px; }
+  .ok { background: #e3f4e5; border: 1px solid #5aa469; }
+  .err { background: #fde8e8; border: 1px solid #c25555; }
+  .hp { position: absolute; left: -9999px; }
+</style>
+</head>
+<body>
+<h1>Request deletion of your Bubble Quest data</h1>
+<p>Use this form to ask Le Labs to delete the data Bubble Quest stores about you. You do not need to reinstall the app. You can also delete your data inside the app under Settings &rarr; Backup &rarr; Delete Account &amp; Cloud Data.</p>
+<p><strong>What is deleted:</strong> your cloud-saved profile and stats, your backup and recovery code, your leaderboard entry, your notification token, and your anonymous account and any linked Google account. Nothing is kept afterwards, except routine Firebase backups that expire within 90 days.</p>
+<p>We will check that the request is yours by replying to the email address you give below, then delete your data within 30 days. See the <a href="index.html">privacy policy</a> for details.</p>
+
+<form id="f" novalidate>
+  <label for="email">Your email address <span class="hint">(required, we reply here to confirm it is you)</span></label>
+  <input id="email" type="email" maxlength="200" autocomplete="email" required>
+
+  <label for="gemail">Google account email linked in the game <span class="hint">(if you linked one)</span></label>
+  <input id="gemail" type="email" maxlength="200">
+
+  <label for="name">Your in-game or leaderboard name <span class="hint">(optional)</span></label>
+  <input id="name" type="text" maxlength="60">
+
+  <label for="note">Anything else that helps us find your data <span class="hint">(optional)</span></label>
+  <textarea id="note" rows="3" maxlength="1000"></textarea>
+
+  <input class="hp" id="site" type="text" tabindex="-1" autocomplete="off" aria-hidden="true">
+  <button id="go" type="submit">Send deletion request</button>
+</form>
+<div id="msg" role="status"></div>
+
+<script>
+(function () {
+  var API_KEY = "AIzaSyASmJobGn8w6mzxT8CSE16Pn0DO30DX-o4"; // public Firebase web identifier; access is enforced by Firestore rules
+  var PROJECT = "bubble-quest-c528f";
+  var WEB3FORMS_KEY = "";                                  // filled in after registering the owner's email at web3forms.com
+  var NTFY_TOPIC = "bq-del-tihcCQCDBXLHwSxOr5aq2465";      // private topic; the owner's phone subscribes to it
+
+  var form = document.getElementById("f"), msg = document.getElementById("msg"), go = document.getElementById("go");
+  function show(cls, html) { msg.className = "box " + cls; msg.innerHTML = html; }
+  function v(id) { return document.getElementById(id).value.trim(); }
+
+  function toFirestore(d) {
+    return fetch("https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=" + API_KEY, {
+      method: "POST", headers: {"Content-Type": "application/json"}, body: "{\"returnSecureToken\":true}"
+    }).then(function (r) { if (!r.ok) throw new Error("auth"); return r.json(); }).then(function (a) {
+      return fetch("https://firestore.googleapis.com/v1/projects/" + PROJECT + "/databases/(default)/documents/deletion_requests", {
+        method: "POST",
+        headers: {"Content-Type": "application/json", "Authorization": "Bearer " + a.idToken},
+        body: JSON.stringify({fields: {
+          email: {stringValue: d.email}, name: {stringValue: d.name}, google_email: {stringValue: d.gemail},
+          note: {stringValue: d.note}, created: {integerValue: String(Math.floor(Date.now() / 1000))}}})
+      });
+    }).then(function (r) { if (!r.ok) throw new Error("firestore"); return true; });
+  }
+  function toEmail(d) {
+    if (!WEB3FORMS_KEY) return Promise.reject(new Error("off"));
+    return fetch("https://api.web3forms.com/submit", {
+      method: "POST", headers: {"Content-Type": "application/json", "Accept": "application/json"},
+      body: JSON.stringify({access_key: WEB3FORMS_KEY, subject: "Bubble Quest data deletion request",
+        from_name: "Bubble Quest deletion form", email: d.email, name: d.name || "(none)",
+        google_email: d.gemail || "(none)", message: d.note || "(none)"})
+    }).then(function (r) { if (!r.ok) throw new Error("email"); return true; });
+  }
+  function toPhone() {
+    // No personal data goes to ntfy, only a nudge to open the admin panel.
+    return fetch("https://ntfy.sh/" + NTFY_TOPIC, {
+      method: "POST", headers: {"Title": "Bubble Quest deletion request", "Priority": "high", "Tags": "warning"},
+      body: "A new data deletion request is waiting in the admin panel."
+    }).then(function (r) { if (!r.ok) throw new Error("ntfy"); return true; });
+  }
+
+  form.addEventListener("submit", function (e) {
+    e.preventDefault();
+    if (v("site")) { show("ok", "Thank you. Your request was received."); return; } // bots fill the hidden field
+    var d = {email: v("email"), gemail: v("gemail"), name: v("name"), note: v("note")};
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(d.email)) { show("err", "Please enter a valid email address so we can reply."); return; }
+    go.disabled = true; show("ok", "Sending...");
+    var jobs = [toFirestore(d), toEmail(d), toPhone()].map(function (p) { return p.then(function () { return true; }, function () { return false; }); });
+    Promise.all(jobs).then(function (res) {
+      // The record (Firestore) or the email must have arrived; the phone nudge alone is not enough.
+      if (res[0] || res[1]) {
+        show("ok", "<strong>Thank you.</strong> Your request was received. We will reply to " + d.email.replace(/[<>&"]/g, "") + " to confirm it is you, then delete your data within 30 days.");
+        form.reset();
+      } else {
+        show("err", "Sorry, the request could not be sent. Please email <strong>lelabs.dev@gmail.com</strong> with the subject \"Bubble Quest data deletion\" instead.");
+      }
+      go.disabled = false;
+    });
+  });
+})();
+</script>
+</body>
+</html>
