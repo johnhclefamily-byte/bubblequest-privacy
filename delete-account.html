@@ -51,7 +51,7 @@
 
   var form = document.getElementById("f"), msg = document.getElementById("msg"), go = document.getElementById("go");
   function show(cls, html) { msg.className = "box " + cls; msg.innerHTML = html; }
-  function v(id) { return document.getElementById(id).value.trim(); }
+  function v(id) { return document.getElementById(id).value.trim().replace(/^mailto:/i, ""); } // a pasted link can carry a mailto: prefix
 
   function toFirestore(d) {
     return fetch("https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=" + API_KEY, {
